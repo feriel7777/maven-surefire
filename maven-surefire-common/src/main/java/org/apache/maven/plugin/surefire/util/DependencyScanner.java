@@ -94,6 +94,12 @@ public class DependencyScanner
         }
     }
 
+    /**
+     * Filters <code>artifacts</code> by <code>groupArtifactIds</code>, and returns a list of
+     * {@link Artifact}s matching the filter. If none match, an empty list is returned. The
+     * format of the <code>groupArtifactIds</code> strings should be:
+     * <pre>groupId:artifactId[:packaging/type[:classifier[:version]]]</pre>
+     */
     public static List<Artifact> filter( List<Artifact> artifacts, List<String> groupArtifactIds )
     {
         List<Artifact> matches = new ArrayList<>();
@@ -105,14 +111,12 @@ public class DependencyScanner
         {
             for ( String groups : groupArtifactIds )
             {
-                // groupId:artifactId[:version[:type[:classifier]]]
-                String[] groupArtifact = groups.split( ":" );
-                if ( groupArtifact.length < 2 || groupArtifact.length > 5 )
+                if ( !hasGroupAndArtifactId( groups ) )
                 {
                     throw new IllegalArgumentException( "dependencyToScan argument should be in format"
-                        + " 'groupid:artifactid[:version[:type[:classifier]]]': " + groups );
+                        + " 'groupId:artifactId[:packaging/type[:classifier[:version]]]': " + groups );
                 }
-                if ( artifactMatchesGavtc( artifact, groupArtifact ) )
+                if ( artifactMatchesGavtc( artifact, groups ) )
                 {
                     matches.add( artifact );
                 }
@@ -121,30 +125,39 @@ public class DependencyScanner
         return matches;
     }
     
-    private static boolean artifactMatchesGavtc( Artifact artifact, String[] gavtc )
+    private static boolean artifactMatchesGavtc( Artifact artifact, String groups )
     {
-        boolean match = false;
-        if ( artifact.getGroupId().matches( gavtc[0] ) && artifact.getArtifactId().matches( gavtc[1] ) )
-        {
-            match = true;
-            // Check version
-            if ( match && gavtc.length > 2 )
-            {
-                match = StringUtils.isBlank( gavtc[2] ) || artifact.getVersion().equals( gavtc[2] );
-                // Check type
-                if ( match && gavtc.length > 3 )
-                {
-                    match = StringUtils.isBlank( gavtc[3] )
-                        || ( artifact.getType() != null && artifact.getType().equals( gavtc[3] ) );
-                    // Check classifier
-                    if ( match && gavtc.length > 4 )
-                    {
-                        match = StringUtils.isBlank( gavtc[4] )
-                            || ( artifact.getClassifier() != null && artifact.getClassifier().matches( gavtc[4] ) );
-                    }
-                }
-            }
-        }
+        String[] gavtc = StringUtils.splitPreserveAllTokens( groups, ':' );
+        boolean match = artifact.getGroupId().matches( gavtc[0] ) && artifact.getArtifactId().matches( gavtc[1] );
+
+        match = match && ( !hasVersion( gavtc ) || artifact.getVersion().equals( gavtc[2] ) );
+
+        match =
+            match && ( !hasType( gavtc ) || ( artifact.getType() != null && artifact.getType().equals( gavtc[3] ) ) );
+
+        match = match && ( !hasClassifier( gavtc )
+            || ( artifact.getClassifier() != null && artifact.getClassifier().matches( gavtc[4] ) ) );
+
         return match;
+    }
+    
+    private static boolean hasGroupAndArtifactId( String groups )
+    {
+        return StringUtils.countMatches( groups, ':' ) >= 1;
+    }
+    
+    private static boolean hasVersion( String... groups )
+    {
+        return groups.length >= 3 && StringUtils.isNotBlank( groups[2] );
+    }
+    
+    private static boolean hasType( String... groups )
+    {
+        return groups.length >= 4 && StringUtils.isNotBlank( groups[3] );
+    }
+    
+    private static boolean hasClassifier( String... groups )
+    {
+        return groups.length >= 5 && StringUtils.isNotBlank( groups[4] );
     }
 }

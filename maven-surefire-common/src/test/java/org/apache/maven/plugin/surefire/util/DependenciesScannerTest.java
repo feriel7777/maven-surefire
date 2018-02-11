@@ -146,10 +146,9 @@ public class DependenciesScannerTest
         include.add( "**/*A.java" );
         List<String> exclude = new ArrayList<String>();
 
-        DependencyScanner scanner =
-            new DependencyScanner( DependencyScanner.filter( Arrays.asList( mainArtifact, testArtifact ),
-                                                             scanDependencies ),
-                                   new TestListResolver( include, exclude ) );
+        List<Artifact> artifacts = Arrays.asList( mainArtifact, testArtifact );
+        DependencyScanner scanner = new DependencyScanner( DependencyScanner.filter( artifacts, scanDependencies ),
+                                                           new TestListResolver( include, exclude ) );
 
         ScanResult classNames = scanner.scan();
         assertNotNull( classNames );
@@ -189,10 +188,9 @@ public class DependenciesScannerTest
         include.add( "**/*A.java" );
         List<String> exclude = new ArrayList<String>();
 
-        DependencyScanner scanner =
-            new DependencyScanner( DependencyScanner.filter( Arrays.asList( artifact10, artifact20 ),
-                                                             scanDependencies ),
-                                   new TestListResolver( include, exclude ) );
+        List<Artifact> artifacts = Arrays.asList( artifact10, artifact20 );
+        DependencyScanner scanner = new DependencyScanner( DependencyScanner.filter( artifacts, scanDependencies ),
+                                                           new TestListResolver( include, exclude ) );
 
         ScanResult classNames = scanner.scan();
         assertNotNull( classNames );

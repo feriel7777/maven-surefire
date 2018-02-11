@@ -216,6 +216,9 @@ Inclusions and Exclusions of Tests
   Dependencies can be specified using the <<<groupId:artifactId[:version[:type[:classifier]]]>>> format, and must already
   be <<<dependency>>> elements in scope.
   
+  <Note:> Support for version, type and classifier was introduced in version <<<2.21.0>>>. When using earlier versions,
+  ${thisPlugin} will fail with an <<<IllegalArgumentException>>> if more than groupId and artifactId are specified.
+  
 +---+
 <project>
   [...]
