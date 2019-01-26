@@ -95,10 +95,12 @@ public class DependencyScanner
     }
 
     /**
-     * Filters <code>artifacts</code> by <code>groupArtifactIds</code>, and returns a list of
-     * {@link Artifact}s matching the filter. If none match, an empty list is returned. The
-     * format of the <code>groupArtifactIds</code> strings should be:
-     * <pre>groupId:artifactId[:packaging/type[:classifier[:version]]]</pre>
+     *
+     * @param artifacts a list to filter
+     * @param groupArtifactIds a list of strings in the form
+     *                         <pre>groupId:artifactId[:packaging/type[:classifier[:version]]]</pre>
+     * @return list of items in <code>artifacts</code> that match any of the filters in <code>groupArtifactIds</code>,
+     * empty if none match
      */
     public static List<Artifact> filter( List<Artifact> artifacts, List<String> groupArtifactIds )
     {

@@ -65,11 +65,7 @@ public class DependenciesScannerTest
         include.add( "**/*A.java" );
         List<String> exclude = new ArrayList<>();
 
-        List<File> dependenciesToScan = new ArrayList<>();
-        for ( Artifact a : DependencyScanner.filter( Collections.singletonList( artifact ), scanDependencies ) )
-        {
-            dependenciesToScan.add( a.getFile() );
-        }
+        List<File> dependenciesToScan = filterArtifactsAsFiles(scanDependencies, Collections.singletonList(artifact));
 
         DependencyScanner scanner =
             new DependencyScanner( dependenciesToScan, new TestListResolver( include, exclude ) );
@@ -104,10 +100,11 @@ public class DependenciesScannerTest
         include.add( "**/*A.java" );
         List<String> exclude = new ArrayList<String>();
 
+
+        List<File> filesToScan = filterArtifactsAsFiles(scanDependencies, Collections.singletonList(testArtifact));
+
         DependencyScanner scanner =
-            new DependencyScanner( DependencyScanner.filter( Collections.singletonList( testArtifact ),
-                                                             scanDependencies ),
-                                   new TestListResolver( include, exclude ) );
+            new DependencyScanner( filesToScan, new TestListResolver( include, exclude ) );
 
         ScanResult classNames = scanner.scan();
         assertNotNull( classNames );
@@ -147,8 +144,10 @@ public class DependenciesScannerTest
         List<String> exclude = new ArrayList<String>();
 
         List<Artifact> artifacts = Arrays.asList( mainArtifact, testArtifact );
-        DependencyScanner scanner = new DependencyScanner( DependencyScanner.filter( artifacts, scanDependencies ),
-                                                           new TestListResolver( include, exclude ) );
+
+        List<File> filesToScan = filterArtifactsAsFiles(scanDependencies, artifacts);
+
+        DependencyScanner scanner = new DependencyScanner( filesToScan, new TestListResolver( include, exclude ) );
 
         ScanResult classNames = scanner.scan();
         assertNotNull( classNames );
@@ -189,8 +188,9 @@ public class DependenciesScannerTest
         List<String> exclude = new ArrayList<String>();
 
         List<Artifact> artifacts = Arrays.asList( artifact10, artifact20 );
-        DependencyScanner scanner = new DependencyScanner( DependencyScanner.filter( artifacts, scanDependencies ),
-                                                           new TestListResolver( include, exclude ) );
+
+        List<File> filesToScan = filterArtifactsAsFiles(scanDependencies, artifacts);
+        DependencyScanner scanner = new DependencyScanner( filesToScan, new TestListResolver( include, exclude ) );
 
         ScanResult classNames = scanner.scan();
         assertNotNull( classNames );
@@ -201,6 +201,14 @@ public class DependenciesScannerTest
         classNames.writeTo( props );
         assertEquals( 1, props.size() );
         assertFalse( props.values().contains( "org.test.ClassA" ) );
+    }
+
+    private static List<File> filterArtifactsAsFiles(List<String> scanDependencies, List<Artifact> artifacts) {
+        List<File> filesToScan = new ArrayList<>();
+        for (Artifact a : DependencyScanner.filter(artifacts, scanDependencies)) {
+            filesToScan.add(a.getFile());
+        }
+        return filesToScan;
     }
 
     private File writeTestFile( String fileName, String... entries )
