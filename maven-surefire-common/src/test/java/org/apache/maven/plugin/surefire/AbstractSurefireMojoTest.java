@@ -247,7 +247,7 @@ public class AbstractSurefireMojoTest
         File classesDir = mockFile( "classes" );
         File testClassesDir = mockFile( "test-classes" );
         TestClassPath testClasspath =
-                new TestClassPath( asList( junit, hamcrest ), classesDir, testClassesDir, null, null );
+                new TestClassPath( asList( junit, hamcrest ), classesDir, testClassesDir, null );
 
         doReturn( testClasspath ).when( mojo, "generateTestClasspath" );
         doReturn( 1 ).when( mojo, "getEffectiveForkCount" );
@@ -267,11 +267,10 @@ public class AbstractSurefireMojoTest
         when( mojo.getConsoleLogger() ).thenReturn( new PluginConsoleLogger( logger ) );
 
         StartupConfiguration conf = invokeMethod( mojo, "newStartupConfigWithClasspath",
-                classLoaderConfiguration, providerArtifacts, "org.asf.Provider" );
+                classLoaderConfiguration, providerArtifacts, "org.asf.Provider", testClasspath );
 
         verify( mojo, times( 1 ) ).effectiveIsEnableAssertions();
         verify( mojo, times( 1 ) ).isChildDelegation();
-        verifyPrivate( mojo, times( 1 ) ).invoke( "generateTestClasspath" );
         verify( mojo, times( 1 ) ).getEffectiveForkCount();
         ArgumentCaptor<String> argument = ArgumentCaptor.forClass( String.class );
         verify( logger, times( 6 ) ).debug( argument.capture() );

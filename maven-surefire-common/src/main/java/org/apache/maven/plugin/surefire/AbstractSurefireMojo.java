@@ -21,6 +21,8 @@ package org.apache.maven.plugin.surefire;
  */
 
 import org.apache.maven.artifact.Artifact;
+import org.apache.maven.artifact.DefaultArtifact;
+import org.apache.maven.artifact.handler.ArtifactHandler;
 import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.repository.RepositorySystem;
@@ -663,6 +665,9 @@ public abstract class AbstractSurefireMojo
     @Parameter( defaultValue = "${project.pluginArtifactRepositories}", readonly = true, required = true )
     private List<ArtifactRepository> remoteRepositories;
 
+    @Parameter( defaultValue = "${project.remoteArtifactRepositories}", required = true, readonly = true )
+    private List<ArtifactRepository> projectRemoteRepositories;
+
     /**
      * Flag to disable the generation of report files in xml format.
      *
@@ -983,7 +988,8 @@ public abstract class AbstractSurefireMojo
     private void executeAfterPreconditionsChecked( @Nonnull DefaultScanResult scanResult )
         throws MojoExecutionException, MojoFailureException
     {
-        List<ProviderInfo> providers = createProviders();
+        TestClassPath testClasspathWrapper = generateTestClasspath();
+        List<ProviderInfo> providers = createProviders( testClasspathWrapper );
 
         RunResult current = noTestsRun();
 
@@ -992,7 +998,7 @@ public abstract class AbstractSurefireMojo
         {
             try
             {
-                current = current.aggregate( executeProvider( provider, scanResult ) );
+                current = current.aggregate( executeProvider( provider, scanResult, testClasspathWrapper ) );
             }
             catch ( SurefireBooterForkException | SurefireExecutionException | TestSetFailedException e )
             {
@@ -1016,16 +1022,17 @@ public abstract class AbstractSurefireMojo
         dependencyResolver = new SurefireDependencyResolver( getRepositorySystem(),
                                                                    getConsoleLogger(), getLocalRepository(),
                                                                    getRemoteRepositories(),
+                                                                   getProjectRemoteRepositories(),
                                                                    getPluginName() );
     }
 
-    protected List<ProviderInfo> createProviders()
+    protected List<ProviderInfo> createProviders( TestClassPath testClasspathWrapper )
         throws MojoExecutionException
     {
         Artifact junitDepArtifact = getJunitDepArtifact();
         return new ProviderList( new DynamicProviderInfo( null ),
                               new TestNgProviderInfo( getTestNgArtifact() ),
-                              new JUnitPlatformProviderInfo( getJunitPlatformArtifact() ),
+                              new JUnitPlatformProviderInfo( getJunitPlatformArtifact(), testClasspathWrapper ),
                               new JUnitCoreProviderInfo( getJunitArtifact(), junitDepArtifact ),
                               new JUnit4ProviderInfo( getJunitArtifact(), junitDepArtifact ),
                               new JUnit3ProviderInfo() )
@@ -1117,7 +1124,8 @@ public abstract class AbstractSurefireMojo
     }
 
     @Nonnull
-    private RunResult executeProvider( @Nonnull ProviderInfo provider, @Nonnull DefaultScanResult scanResult )
+    private RunResult executeProvider( @Nonnull ProviderInfo provider, @Nonnull DefaultScanResult scanResult,
+                                       @Nonnull TestClassPath testClasspathWrapper )
         throws MojoExecutionException, MojoFailureException, SurefireExecutionException, SurefireBooterForkException,
         TestSetFailedException
     {
@@ -1132,8 +1140,8 @@ public abstract class AbstractSurefireMojo
         {
             createCopyAndReplaceForkNumPlaceholder( effectiveProperties, 1 ).copyToSystemProperties();
 
-            InPluginVMSurefireStarter surefireStarter =
-                createInprocessStarter( provider, classLoaderConfiguration, runOrderParameters, scanResult, platform );
+            InPluginVMSurefireStarter surefireStarter = createInprocessStarter( provider, classLoaderConfiguration,
+                    runOrderParameters, scanResult, platform, testClasspathWrapper );
             return surefireStarter.runSuitesInProcess( scanResult );
         }
         else
@@ -1149,7 +1157,8 @@ public abstract class AbstractSurefireMojo
             try
             {
                 forkStarter = createForkStarter( provider, forkConfiguration, classLoaderConfiguration,
-                                                       runOrderParameters, getConsoleLogger(), scanResult, platform );
+                                                       runOrderParameters, getConsoleLogger(), scanResult, platform,
+                                                       testClasspathWrapper );
 
                 return forkStarter.run( effectiveProperties, scanResult );
             }
@@ -1688,7 +1697,7 @@ public abstract class AbstractSurefireMojo
         return h;
     }
 
-    public File getStatisticsFile( String configurationHash )
+    private File getStatisticsFile( String configurationHash )
     {
         return new File( getBasedir(), ".surefire-" + configurationHash );
     }
@@ -1696,7 +1705,8 @@ public abstract class AbstractSurefireMojo
     private StartupConfiguration createStartupConfiguration( @Nonnull ProviderInfo provider, boolean isInprocess,
                                                              @Nonnull ClassLoaderConfiguration classLoaderConfiguration,
                                                              @Nonnull DefaultScanResult scanResult,
-                                                             @Nonnull Platform platform )
+                                                             @Nonnull Platform platform,
+                                                             @Nonnull TestClassPath testClasspathWrapper )
         throws MojoExecutionException
     {
         try
@@ -1714,11 +1724,12 @@ public abstract class AbstractSurefireMojo
                         .toString();
 
                 return newStartupConfigWithModularPath( classLoaderConfiguration, providerArtifacts, providerName,
-                        getModuleDescriptor(), scanResult, javaHome );
+                        getModuleDescriptor(), scanResult, javaHome, testClasspathWrapper );
             }
             else
             {
-                return newStartupConfigWithClasspath( classLoaderConfiguration, providerArtifacts, providerName );
+                return newStartupConfigWithClasspath( classLoaderConfiguration, providerArtifacts, providerName,
+                        testClasspathWrapper );
             }
         }
         catch ( IOException e )
@@ -1729,12 +1740,9 @@ public abstract class AbstractSurefireMojo
 
     private StartupConfiguration newStartupConfigWithClasspath(
             @Nonnull ClassLoaderConfiguration classLoaderConfiguration, @Nonnull Set<Artifact> providerArtifacts,
-            @Nonnull String providerName )
+            @Nonnull String providerName, @Nonnull TestClassPath testClasspathWrapper )
     {
-        TestClassPath testClasspathWrapper = generateTestClasspath();
         Classpath testClasspath = testClasspathWrapper.toClasspath();
-
-        testClasspathWrapper.avoidArtifactDuplicates( providerArtifacts );
 
         Classpath providerClasspath = ClasspathCache.getCachedClassPath( providerName );
         if ( providerClasspath == null )
@@ -1806,13 +1814,10 @@ public abstract class AbstractSurefireMojo
     private StartupConfiguration newStartupConfigWithModularPath(
             @Nonnull ClassLoaderConfiguration classLoaderConfiguration, @Nonnull Set<Artifact> providerArtifacts,
             @Nonnull String providerName, @Nonnull File moduleDescriptor, @Nonnull DefaultScanResult scanResult,
-            @Nonnull String javaHome )
+            @Nonnull String javaHome, @Nonnull TestClassPath testClasspathWrapper )
             throws IOException
     {
-        TestClassPath testClasspathWrapper = generateTestClasspath();
         Classpath testClasspath = testClasspathWrapper.toClasspath();
-
-        testClasspathWrapper.avoidArtifactDuplicates( providerArtifacts );
 
         Classpath providerClasspath = ClasspathCache.getCachedClassPath( providerName );
         if ( providerClasspath == null )
@@ -2141,11 +2146,12 @@ public abstract class AbstractSurefireMojo
     private ForkStarter createForkStarter( @Nonnull ProviderInfo provider, @Nonnull ForkConfiguration forkConfiguration,
                                            @Nonnull ClassLoaderConfiguration classLoaderConfiguration,
                                            @Nonnull RunOrderParameters runOrderParameters, @Nonnull ConsoleLogger log,
-                                           @Nonnull DefaultScanResult scanResult, @Nonnull Platform platform )
+                                           @Nonnull DefaultScanResult scanResult, @Nonnull Platform platform,
+                                           @Nonnull TestClassPath testClasspathWrapper )
         throws MojoExecutionException, MojoFailureException
     {
-        StartupConfiguration startupConfiguration =
-                createStartupConfiguration( provider, false, classLoaderConfiguration, scanResult, platform );
+        StartupConfiguration startupConfiguration = createStartupConfiguration( provider, false,
+                classLoaderConfiguration, scanResult, platform, testClasspathWrapper );
         String configChecksum = getConfigChecksum();
         StartupReportConfiguration startupReportConfiguration = getStartupReportConfiguration( configChecksum, true );
         ProviderConfiguration providerConfiguration = createProviderConfiguration( runOrderParameters );
@@ -2157,11 +2163,12 @@ public abstract class AbstractSurefireMojo
                                                               @Nonnull ClassLoaderConfiguration classLoaderConfig,
                                                               @Nonnull RunOrderParameters runOrderParameters,
                                                               @Nonnull DefaultScanResult scanResult,
-                                                              @Nonnull Platform platform )
+                                                              @Nonnull Platform platform,
+                                                              @Nonnull TestClassPath testClasspathWrapper )
         throws MojoExecutionException, MojoFailureException
     {
-        StartupConfiguration startupConfiguration =
-                createStartupConfiguration( provider, true, classLoaderConfig, scanResult, platform );
+        StartupConfiguration startupConfiguration = createStartupConfiguration( provider, true, classLoaderConfig,
+                scanResult, platform, testClasspathWrapper );
         String configChecksum = getConfigChecksum();
         StartupReportConfiguration startupReportConfiguration = getStartupReportConfiguration( configChecksum, false );
         ProviderConfiguration providerConfiguration = createProviderConfiguration( runOrderParameters );
@@ -2451,6 +2458,7 @@ public abstract class AbstractSurefireMojo
         checksum.add( isParallelOptimized() );
         checksum.add( isTrimStackTrace() );
         checksum.add( getRemoteRepositories() );
+        checksum.add( getProjectRemoteRepositories() );
         checksum.add( isDisableXmlReport() );
         checksum.add( isUseSystemClassLoader() );
         checksum.add( isUseManifestOnlyJar() );
@@ -2504,7 +2512,7 @@ public abstract class AbstractSurefireMojo
      */
     private TestClassPath generateTestClasspath()
     {
-        @SuppressWarnings( "unchecked" ) Set<Artifact> classpathArtifacts = getProject().getArtifacts();
+        Set<Artifact> classpathArtifacts = getProject().getArtifacts();
 
         if ( getClasspathDependencyScopeExclude() != null && !getClasspathDependencyScopeExclude().isEmpty() )
         {
@@ -2520,7 +2528,7 @@ public abstract class AbstractSurefireMojo
         }
 
         return new TestClassPath( classpathArtifacts, getClassesDirectory(),
-                getTestClassesDirectory(), getAdditionalClasspathElements(), getConsoleLogger() );
+                getTestClassesDirectory(), getAdditionalClasspathElements() );
     }
 
     /**
@@ -2561,7 +2569,7 @@ public abstract class AbstractSurefireMojo
         if ( existing == null )
         {
             List<String> items = new ArrayList<>();
-            for ( Artifact artifact : dependencyResolver.resolveArtifact( surefireArtifact ).getArtifacts() )
+            for ( Artifact artifact : dependencyResolver.resolvePluginArtifact( surefireArtifact ).getArtifacts() )
             {
                 getConsoleLogger().debug(
                     "Adding to " + getPluginName() + " booter test classpath: " + artifact.getFile().getAbsolutePath()
@@ -2866,11 +2874,16 @@ public abstract class AbstractSurefireMojo
     final class JUnitPlatformProviderInfo
         implements ProviderInfo
     {
-        private final Artifact junitArtifact;
+        private static final String PROVIDER_DEP_GID = "org.junit.platform";
+        private static final String PROVIDER_DEP_AID = "junit-platform-launcher";
 
-        JUnitPlatformProviderInfo( Artifact junitArtifact )
+        private final Artifact junitPlatformArtifact;
+        private final TestClassPath testClasspathWrapper;
+
+        JUnitPlatformProviderInfo( Artifact junitPlatformArtifact, TestClassPath testClasspathWrapper )
         {
-            this.junitArtifact = junitArtifact;
+            this.junitPlatformArtifact = junitPlatformArtifact;
+            this.testClasspathWrapper = testClasspathWrapper;
         }
 
         @Override
@@ -2883,7 +2896,7 @@ public abstract class AbstractSurefireMojo
         @Override
         public boolean isApplicable()
         {
-            return junitArtifact != null;
+            return junitPlatformArtifact != null;
         }
 
         @Override
@@ -2896,8 +2909,108 @@ public abstract class AbstractSurefireMojo
         @Nonnull
         public Set<Artifact> getProviderClasspath()
         {
-            String version = surefireBooterArtifact.getBaseVersion();
-            return dependencyResolver.getProviderClasspath( "surefire-junit-platform", version );
+            String surefireVersion = surefireBooterArtifact.getBaseVersion();
+            Map<String, Artifact> providerArtifacts =
+                    dependencyResolver.getProviderClasspathAsMap( "surefire-junit-platform", surefireVersion );
+            Map<String, Artifact> testDependencies = testClasspathWrapper.getTestDependencies();
+
+            if ( hasDependencyPlatformEngine( testDependencies ) )
+            {
+                String filterTestDependency = "org.junit.platform:junit-platform-engine";
+                logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
+                narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
+            }
+            else if ( hasDependencyJupiterAPI( testDependencies ) )
+            {
+                String api = "org.junit.jupiter:junit-jupiter-api";
+                String engineGroupId = "org.junit.jupiter";
+                String engineArtifactId = "junit-jupiter-engine";
+                String version = testDependencies.get( api ).getBaseVersion();
+                addEngineByApi( api, engineGroupId, engineArtifactId, providerArtifacts, testDependencies );
+                alignVersions( version, providerArtifacts, testDependencies );
+            }
+            else if ( hasDependencyJUnit4( testDependencies ) )
+            {
+                String version = testDependencies.get( "junit:junit" ).getBaseVersion();
+                addEngineByApi( "junit:junit", "junit", "junit", providerArtifacts, testDependencies );
+                alignVersions( version, providerArtifacts, testDependencies );
+            }
+            return new LinkedHashSet<>( providerArtifacts.values() );
+        }
+
+        private void addEngineByApi( String api,
+                                     String engineGroupId, String engineArtifactId,
+                                     Map<String, Artifact> providerArtifacts,
+                                     Map<String, Artifact> testDependencies )
+        {
+            String jupiterVersion = testDependencies.get( api ).getBaseVersion();
+            narrowProviderDependencies( api, providerArtifacts, testDependencies );
+            for ( Artifact jupiterDep : resolve( engineGroupId, engineArtifactId, jupiterVersion, null, "jar" ) )
+            {
+                String key = jupiterDep.getGroupId() + ":" + jupiterDep.getArtifactId();
+                if ( !testDependencies.containsKey( key ) )
+                {
+                    providerArtifacts.put( key, jupiterDep );
+                }
+            }
+        }
+
+        private void narrowProviderDependencies( String filterTestDependency,
+                                                 Map<String, Artifact> providerArtifacts,
+                                                 Map<String, Artifact> testDependencies )
+        {
+            Artifact engine = testDependencies.get( filterTestDependency );
+            String groupId = engine.getGroupId();
+            String artifactId = engine.getArtifactId();
+            String version = engine.getBaseVersion();
+            String classifier = engine.getClassifier();
+            String type = engine.getType();
+            for ( Artifact engineDep : resolve( groupId, artifactId, version, classifier, type ) )
+            {
+                providerArtifacts.remove( engineDep.getGroupId() + ":" + engineDep.getArtifactId() );
+                logDebugOrCliShowErrors( "Removed artifact " + engineDep + " from provider. "
+                        + "Already appears in test classpath." );
+            }
+            alignVersions( version, providerArtifacts, testDependencies );
+        }
+
+        private void alignVersions( String version,
+                                    Map<String, Artifact> providerArtifacts,
+                                    Map<String, Artifact> testDependencies )
+        {
+            for ( Artifact launcherArtifact : resolve( PROVIDER_DEP_GID, PROVIDER_DEP_AID, version, null, "jar" ) )
+            {
+                String key = launcherArtifact.getGroupId() + ":" + launcherArtifact.getArtifactId();
+                if ( !testDependencies.containsKey( key ) )
+                {
+                    providerArtifacts.put( key, launcherArtifact );
+                }
+            }
+        }
+
+        private Set<Artifact> resolve( String g, String a, String v, String c, String t )
+        {
+            ArtifactHandler handler = junitPlatformArtifact.getArtifactHandler();
+            Artifact artifact = new DefaultArtifact( g, a, v, null, t, c, handler );
+            logDebugOrCliShowErrors( "Resolving artifact " + g + ":" + a + ":" + v );
+            Set<Artifact> r = dependencyResolver.resolveProjectArtifact( artifact ).getArtifacts();
+            logDebugOrCliShowErrors( "Resolved artifact " + g + ":" + a + ":" + v + " to " + r );
+            return r;
+        }
+
+        private boolean hasDependencyJUnit4( Map<String, Artifact> providerArtifacts )
+        {
+            return providerArtifacts.containsKey( "junit:junit" );
+        }
+
+        private boolean hasDependencyJupiterAPI( Map<String, Artifact> providerArtifacts )
+        {
+            return providerArtifacts.containsKey( "org.junit.jupiter:junit-jupiter-api" );
+        }
+
+        private boolean hasDependencyPlatformEngine( Map<String, Artifact> providerArtifacts )
+        {
+            return providerArtifacts.containsKey( "org.junit.platform:junit-platform-engine" );
         }
     }
 
@@ -3421,6 +3534,17 @@ public abstract class AbstractSurefireMojo
     public void setTrimStackTrace( boolean trimStackTrace )
     {
         this.trimStackTrace = trimStackTrace;
+    }
+
+    public List<ArtifactRepository> getProjectRemoteRepositories()
+    {
+        return projectRemoteRepositories;
+    }
+
+    @SuppressWarnings( "UnusedDeclaration" )
+    public void setProjectRemoteRepositories( List<ArtifactRepository> projectRemoteRepositories )
+    {
+        this.projectRemoteRepositories = projectRemoteRepositories;
     }
 
     public List<ArtifactRepository> getRemoteRepositories()
