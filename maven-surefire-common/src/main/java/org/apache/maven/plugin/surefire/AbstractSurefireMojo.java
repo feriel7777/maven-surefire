@@ -847,6 +847,11 @@ public abstract class AbstractSurefireMojo
         }
     }
 
+    void setLogger( Logger logger )
+    {
+        this.logger = logger;
+    }
+
     @Nonnull
     protected final PluginConsoleLogger getConsoleLogger()
     {
@@ -988,8 +993,8 @@ public abstract class AbstractSurefireMojo
     private void executeAfterPreconditionsChecked( @Nonnull DefaultScanResult scanResult )
         throws MojoExecutionException, MojoFailureException
     {
-        TestClassPath testClasspathWrapper = generateTestClasspath();
-        List<ProviderInfo> providers = createProviders( testClasspathWrapper );
+        TestClassPath testClasspath = generateTestClasspath();
+        List<ProviderInfo> providers = createProviders( testClasspath );
 
         RunResult current = noTestsRun();
 
@@ -998,7 +1003,7 @@ public abstract class AbstractSurefireMojo
         {
             try
             {
-                current = current.aggregate( executeProvider( provider, scanResult, testClasspathWrapper ) );
+                current = current.aggregate( executeProvider( provider, scanResult, testClasspath ) );
             }
             catch ( SurefireBooterForkException | SurefireExecutionException | TestSetFailedException e )
             {
@@ -1026,13 +1031,13 @@ public abstract class AbstractSurefireMojo
                                                                    getPluginName() );
     }
 
-    protected List<ProviderInfo> createProviders( TestClassPath testClasspathWrapper )
+    protected List<ProviderInfo> createProviders( TestClassPath testClasspath )
         throws MojoExecutionException
     {
         Artifact junitDepArtifact = getJunitDepArtifact();
         return new ProviderList( new DynamicProviderInfo( null ),
                               new TestNgProviderInfo( getTestNgArtifact() ),
-                              new JUnitPlatformProviderInfo( getJunitPlatformArtifact(), testClasspathWrapper ),
+                              new JUnitPlatformProviderInfo( getJunitPlatformArtifact(), testClasspath ),
                               new JUnitCoreProviderInfo( getJunitArtifact(), junitDepArtifact ),
                               new JUnit4ProviderInfo( getJunitArtifact(), junitDepArtifact ),
                               new JUnit3ProviderInfo() )
@@ -2128,7 +2133,6 @@ public abstract class AbstractSurefireMojo
         return getProjectArtifactMap().get( "junit:junit-dep" );
     }
 
-
     private Artifact getJunitPlatformArtifact()
     {
         Artifact artifact = getProjectArtifactMap().get( getJunitPlatformArtifactName() );
@@ -2878,12 +2882,12 @@ public abstract class AbstractSurefireMojo
         private static final String PROVIDER_DEP_AID = "junit-platform-launcher";
 
         private final Artifact junitPlatformArtifact;
-        private final TestClassPath testClasspathWrapper;
+        private final TestClassPath testClasspath;
 
-        JUnitPlatformProviderInfo( Artifact junitPlatformArtifact, TestClassPath testClasspathWrapper )
+        JUnitPlatformProviderInfo( Artifact junitPlatformArtifact, TestClassPath testClasspath )
         {
             this.junitPlatformArtifact = junitPlatformArtifact;
-            this.testClasspathWrapper = testClasspathWrapper;
+            this.testClasspath = testClasspath;
         }
 
         @Override
@@ -2912,11 +2916,17 @@ public abstract class AbstractSurefireMojo
             String surefireVersion = surefireBooterArtifact.getBaseVersion();
             Map<String, Artifact> providerArtifacts =
                     dependencyResolver.getProviderClasspathAsMap( "surefire-junit-platform", surefireVersion );
-            Map<String, Artifact> testDependencies = testClasspathWrapper.getTestDependencies();
-
+            Map<String, Artifact> testDependencies = testClasspath.getTestDependencies();
+            // pozri hore ten parameter pre junit-platform-engine premenuj hodnotu na junit-platform-commons
             if ( hasDependencyPlatformEngine( testDependencies ) )
             {
                 String filterTestDependency = "org.junit.platform:junit-platform-engine";
+                logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
+                narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
+            }
+            else if ( hasDependencyPlatformCommons( testDependencies ) )
+            {
+                String filterTestDependency = "org.junit.platform:junit-platform-commons";
                 logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
                 narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
             }
@@ -2929,12 +2939,10 @@ public abstract class AbstractSurefireMojo
                 addEngineByApi( api, engineGroupId, engineArtifactId, providerArtifacts, testDependencies );
                 alignVersions( version, providerArtifacts, testDependencies );
             }
-            else if ( hasDependencyJUnit4( testDependencies ) )
+            /*else if ( hasDependencyJUnit4( testDependencies ) )
             {
-                String version = testDependencies.get( "junit:junit" ).getBaseVersion();
                 addEngineByApi( "junit:junit", "junit", "junit", providerArtifacts, testDependencies );
-                alignVersions( version, providerArtifacts, testDependencies );
-            }
+            }*/
             return new LinkedHashSet<>( providerArtifacts.values() );
         }
 
@@ -2943,14 +2951,14 @@ public abstract class AbstractSurefireMojo
                                      Map<String, Artifact> providerArtifacts,
                                      Map<String, Artifact> testDependencies )
         {
-            String jupiterVersion = testDependencies.get( api ).getBaseVersion();
+            String version = testDependencies.get( api ).getBaseVersion();
             narrowProviderDependencies( api, providerArtifacts, testDependencies );
-            for ( Artifact jupiterDep : resolve( engineGroupId, engineArtifactId, jupiterVersion, null, "jar" ) )
+            for ( Artifact dep : resolve( engineGroupId, engineArtifactId, version, null, "jar" ) )
             {
-                String key = jupiterDep.getGroupId() + ":" + jupiterDep.getArtifactId();
-                if ( !testDependencies.containsKey( key ) )
+                String key = dep.getGroupId() + ":" + dep.getArtifactId();
+                if ( testDependencies.remove( key ) != null )
                 {
-                    providerArtifacts.put( key, jupiterDep );
+                    providerArtifacts.put( key, dep );
                 }
             }
         }
@@ -2968,8 +2976,8 @@ public abstract class AbstractSurefireMojo
             for ( Artifact engineDep : resolve( groupId, artifactId, version, classifier, type ) )
             {
                 providerArtifacts.remove( engineDep.getGroupId() + ":" + engineDep.getArtifactId() );
-                logDebugOrCliShowErrors( "Removed artifact " + engineDep + " from provider. "
-                        + "Already appears in test classpath." );
+                logDebugOrCliShowErrors( "Removed artifact " + engineDep
+                        + " from provider. Already appears in test classpath." );
             }
             alignVersions( version, providerArtifacts, testDependencies );
         }
@@ -3006,6 +3014,11 @@ public abstract class AbstractSurefireMojo
         private boolean hasDependencyJupiterAPI( Map<String, Artifact> providerArtifacts )
         {
             return providerArtifacts.containsKey( "org.junit.jupiter:junit-jupiter-api" );
+        }
+
+        private boolean hasDependencyPlatformCommons( Map<String, Artifact> providerArtifacts )
+        {
+            return providerArtifacts.containsKey( "org.junit.platform:junit-platform-commons" );
         }
 
         private boolean hasDependencyPlatformEngine( Map<String, Artifact> providerArtifacts )
@@ -3288,7 +3301,6 @@ public abstract class AbstractSurefireMojo
     {
         this.projectArtifactMap = projectArtifactMap;
     }
-
 
     public String getReportNameSuffix()
     {
