@@ -480,12 +480,13 @@ public abstract class AbstractSurefireMojo
     private String junitArtifactName;
 
     /**
-     * Allows you to specify the name of the JUnit Platform artifact.
-     * If not set, {@code org.junit.platform:junit-platform-engine} will be used.
+     * Allows you to select the name of JUnit5 engine.<br>
+     * If not set, all engines on classpath are used. In normal circumstances the provider is able to
+     * work with multiple engines and no selection is needed to make.
      *
      * @since 2.22.0
      */
-    @Parameter( property = "junitPlatformArtifactName", defaultValue = "org.junit.platform:junit-platform-engine" )
+    @Parameter( property = "junitPlatformArtifactName", defaultValue = "org.junit.platform:junit-platform-commons" )
     private String junitPlatformArtifactName;
 
     /**
@@ -2677,7 +2678,7 @@ public abstract class AbstractSurefireMojo
                                                             + "is picking up an old junit version" );
                     }
                     throw new MojoFailureException( "groups/excludedGroups require TestNG, JUnit48+ or JUnit 5 "
-                            + "on project test classpath" );
+                            + "(a specific engine required on classpath) on project test classpath" );
                 }
             }
 
@@ -2917,7 +2918,6 @@ public abstract class AbstractSurefireMojo
             Map<String, Artifact> providerArtifacts =
                     dependencyResolver.getProviderClasspathAsMap( "surefire-junit-platform", surefireVersion );
             Map<String, Artifact> testDependencies = testClasspath.getTestDependencies();
-            // pozri hore ten parameter pre junit-platform-engine premenuj hodnotu na junit-platform-commons
             if ( hasDependencyPlatformEngine( testDependencies ) )
             {
                 String filterTestDependency = "org.junit.platform:junit-platform-engine";
@@ -2939,10 +2939,6 @@ public abstract class AbstractSurefireMojo
                 addEngineByApi( api, engineGroupId, engineArtifactId, providerArtifacts, testDependencies );
                 alignVersions( version, providerArtifacts, testDependencies );
             }
-            /*else if ( hasDependencyJUnit4( testDependencies ) )
-            {
-                addEngineByApi( "junit:junit", "junit", "junit", providerArtifacts, testDependencies );
-            }*/
             return new LinkedHashSet<>( providerArtifacts.values() );
         }
 
