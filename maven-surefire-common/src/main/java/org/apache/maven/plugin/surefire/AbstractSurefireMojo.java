@@ -480,16 +480,6 @@ public abstract class AbstractSurefireMojo
     private String junitArtifactName;
 
     /**
-     * Allows you to select the name of JUnit5 engine.<br>
-     * If not set, all engines on classpath are used. In normal circumstances the provider is able to
-     * work with multiple engines and no selection is needed to make.
-     *
-     * @since 2.22.0
-     */
-    @Parameter( property = "junitPlatformArtifactName", defaultValue = "org.junit.platform:junit-platform-commons" )
-    private String junitPlatformArtifactName;
-
-    /**
      * Allows you to specify the name of the TestNG artifact. If not set, {@code org.testng:testng} will be used.
      *
      * @since 2.3.1
@@ -2136,11 +2126,13 @@ public abstract class AbstractSurefireMojo
 
     private Artifact getJunitPlatformArtifact()
     {
-        Artifact artifact = getProjectArtifactMap().get( getJunitPlatformArtifactName() );
+        Artifact artifact = getProjectArtifactMap().get( "org.junit.platform:junit-platform-commons" );
         Artifact projectArtifact = project.getArtifact();
-        String projectArtifactName = projectArtifact.getGroupId() + ":" + projectArtifact.getArtifactId();
+        String projectGroupId = projectArtifact.getGroupId();
 
-        if ( artifact == null && projectArtifactName.equals( getJunitPlatformArtifactName() ) )
+        if ( artifact == null && ( "org.junit.platform".equals( projectGroupId )
+                || "org.junit.jupiter".equals( projectGroupId )
+                || "org.junit.vintage".equals( projectGroupId ) ) )
         {
             artifact = projectArtifact;
         }
@@ -2918,45 +2910,58 @@ public abstract class AbstractSurefireMojo
             Map<String, Artifact> providerArtifacts =
                     dependencyResolver.getProviderClasspathAsMap( "surefire-junit-platform", surefireVersion );
             Map<String, Artifact> testDependencies = testClasspath.getTestDependencies();
-            if ( hasDependencyPlatformEngine( testDependencies ) )
+            if ( hasDependencyJupiterAPI( testDependencies ) )
             {
-                String filterTestDependency = "org.junit.platform:junit-platform-engine";
-                logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
-                narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
-            }
-            else if ( hasDependencyPlatformCommons( testDependencies ) )
-            {
-                String filterTestDependency = "org.junit.platform:junit-platform-commons";
-                logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
-                narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
-            }
-            else if ( hasDependencyJupiterAPI( testDependencies ) )
-            {
-                String api = "org.junit.jupiter:junit-jupiter-api";
                 String engineGroupId = "org.junit.jupiter";
                 String engineArtifactId = "junit-jupiter-engine";
-                String version = testDependencies.get( api ).getBaseVersion();
-                addEngineByApi( api, engineGroupId, engineArtifactId, providerArtifacts, testDependencies );
-                alignVersions( version, providerArtifacts, testDependencies );
+                String engineCoordinates = engineGroupId + ":" + engineArtifactId;
+                if ( testDependencies.containsKey( engineCoordinates ) )
+                {
+                    narrowProviderDependencies( engineCoordinates, providerArtifacts, testDependencies );
+                }
+                else
+                {
+                    String api = "org.junit.jupiter:junit-jupiter-api";
+                    logDebugOrCliShowErrors( "Test dependencies contain " + api + ". Resolving " + engineCoordinates );
+                    String engineVersion = testDependencies.get( api ).getBaseVersion();
+                    addEngineByApi( engineGroupId, engineArtifactId, engineVersion,
+                            providerArtifacts, testDependencies );
+                }
+            }
+            else
+            {
+                String filterTestDependency = null;
+                if ( hasDependencyPlatformEngine( testDependencies ) )
+                {
+                    filterTestDependency = "org.junit.platform:junit-platform-engine";
+                }
+                else if ( hasDependencyPlatformCommons( testDependencies ) )
+                {
+                    filterTestDependency = "org.junit.platform:junit-platform-commons";
+                }
+
+                if ( filterTestDependency != null )
+                {
+                    logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
+                    narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
+                }
             }
             return new LinkedHashSet<>( providerArtifacts.values() );
         }
 
-        private void addEngineByApi( String api,
-                                     String engineGroupId, String engineArtifactId,
-                                     Map<String, Artifact> providerArtifacts,
-                                     Map<String, Artifact> testDependencies )
+        private void addEngineByApi( String engineGroupId, String engineArtifactId, String engineVersion,
+                                     Map<String, Artifact> providerArtifacts, Map<String, Artifact> testDependencies )
         {
-            String version = testDependencies.get( api ).getBaseVersion();
-            narrowProviderDependencies( api, providerArtifacts, testDependencies );
-            for ( Artifact dep : resolve( engineGroupId, engineArtifactId, version, null, "jar" ) )
+            providerArtifacts.keySet().removeAll( testDependencies.keySet() );
+            for ( Artifact dep : resolve( engineGroupId, engineArtifactId, engineVersion, null, "jar" ) )
             {
                 String key = dep.getGroupId() + ":" + dep.getArtifactId();
-                if ( testDependencies.remove( key ) != null )
+                if ( !testDependencies.containsKey( key ) )
                 {
                     providerArtifacts.put( key, dep );
                 }
             }
+            alignVersions( providerArtifacts, testDependencies );
         }
 
         private void narrowProviderDependencies( String filterTestDependency,
@@ -2975,17 +2980,16 @@ public abstract class AbstractSurefireMojo
                 logDebugOrCliShowErrors( "Removed artifact " + engineDep
                         + " from provider. Already appears in test classpath." );
             }
-            alignVersions( version, providerArtifacts, testDependencies );
+            alignVersions( providerArtifacts, testDependencies );
         }
 
-        private void alignVersions( String version,
-                                    Map<String, Artifact> providerArtifacts,
-                                    Map<String, Artifact> testDependencies )
+        private void alignVersions( Map<String, Artifact> providerArtifacts, Map<String, Artifact> testDependencies )
         {
+            String version = testDependencies.get( "org.junit.platform:junit-platform-commons" ).getBaseVersion();
             for ( Artifact launcherArtifact : resolve( PROVIDER_DEP_GID, PROVIDER_DEP_AID, version, null, "jar" ) )
             {
                 String key = launcherArtifact.getGroupId() + ":" + launcherArtifact.getArtifactId();
-                if ( !testDependencies.containsKey( key ) )
+                if ( providerArtifacts.containsKey( key ) )
                 {
                     providerArtifacts.put( key, launcherArtifact );
                 }
@@ -3424,17 +3428,6 @@ public abstract class AbstractSurefireMojo
     public void setJunitArtifactName( String junitArtifactName )
     {
         this.junitArtifactName = junitArtifactName;
-    }
-
-    public String getJunitPlatformArtifactName()
-    {
-        return junitPlatformArtifactName;
-    }
-
-    @SuppressWarnings( "UnusedDeclaration" )
-    public void setJunitPlatformArtifactName( String junitPlatformArtifactName )
-    {
-        this.junitPlatformArtifactName = junitPlatformArtifactName;
     }
 
     public String getTestNGArtifactName()
