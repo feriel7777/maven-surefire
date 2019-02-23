@@ -96,6 +96,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -1773,8 +1774,8 @@ public abstract class AbstractSurefireMojo
             boolean contains = false;
             for ( Artifact providerArtifact : providerArtifacts )
             {
-                if ( providerArtifact.getGroupId().equals( inPluginArtifact.getGroupId() )
-                        && providerArtifact.getArtifactId().equals( inPluginArtifact.getArtifactId() ) )
+                if ( hasGroupArtifactId( providerArtifact.getGroupId(), providerArtifact.getArtifactId(),
+                        inPluginArtifact ) )
                 {
                     contains = true;
                     break;
@@ -1786,6 +1787,11 @@ public abstract class AbstractSurefireMojo
             }
         }
         return result;
+    }
+
+    private static boolean hasGroupArtifactId( String groupId, String artifactId, Artifact artifact )
+    {
+        return groupId.equals( artifact.getGroupId() ) && artifactId.equals( artifact.getArtifactId() );
     }
 
     private static Classpath createInProcClasspath( Classpath providerClasspath, Set<Artifact> newArtifacts )
@@ -2127,9 +2133,13 @@ public abstract class AbstractSurefireMojo
     private Artifact getJunitPlatformArtifact()
     {
         Artifact artifact = getProjectArtifactMap().get( "org.junit.platform:junit-platform-commons" );
+        if ( artifact == null )
+        {
+            artifact = getPluginArtifactMap().get( "org.junit.platform:junit-platform-engine" );
+        }
+
         Artifact projectArtifact = project.getArtifact();
         String projectGroupId = projectArtifact.getGroupId();
-
         if ( artifact == null && ( "org.junit.platform".equals( projectGroupId )
                 || "org.junit.jupiter".equals( projectGroupId )
                 || "org.junit.vintage".equals( projectGroupId ) ) )
@@ -2910,41 +2920,36 @@ public abstract class AbstractSurefireMojo
             Map<String, Artifact> providerArtifacts =
                     dependencyResolver.getProviderClasspathAsMap( "surefire-junit-platform", surefireVersion );
             Map<String, Artifact> testDependencies = testClasspath.getTestDependencies();
-            if ( hasDependencyJupiterAPI( testDependencies ) )
+
+            if ( hasDependencyPlatformEngine( testDependencies ) )
+            {
+                String filterTestDependency = "org.junit.platform:junit-platform-engine";
+                logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
+                narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
+            }
+            else if ( hasDependencyPlatformEngine( getPluginArtifactMap() ) )
+            {
+                Map<String, Artifact> engineArtifacts = new HashMap<>( getPluginArtifactMap() );
+                for ( Iterator<String> keys = engineArtifacts.keySet().iterator(); keys.hasNext(); )
+                {
+                    if ( keys.next().startsWith( "org.apache.maven.surefire:" ) )
+                    {
+                        keys.remove();
+                    }
+                }
+                providerArtifacts.putAll( engineArtifacts );
+                alignVersions( providerArtifacts, engineArtifacts );
+            }
+            else if ( hasDependencyJupiterAPI( testDependencies ) )
             {
                 String engineGroupId = "org.junit.jupiter";
                 String engineArtifactId = "junit-jupiter-engine";
                 String engineCoordinates = engineGroupId + ":" + engineArtifactId;
-                if ( testDependencies.containsKey( engineCoordinates ) )
-                {
-                    narrowProviderDependencies( engineCoordinates, providerArtifacts, testDependencies );
-                }
-                else
-                {
-                    String api = "org.junit.jupiter:junit-jupiter-api";
-                    logDebugOrCliShowErrors( "Test dependencies contain " + api + ". Resolving " + engineCoordinates );
-                    String engineVersion = testDependencies.get( api ).getBaseVersion();
-                    addEngineByApi( engineGroupId, engineArtifactId, engineVersion,
-                            providerArtifacts, testDependencies );
-                }
-            }
-            else
-            {
-                String filterTestDependency = null;
-                if ( hasDependencyPlatformEngine( testDependencies ) )
-                {
-                    filterTestDependency = "org.junit.platform:junit-platform-engine";
-                }
-                else if ( hasDependencyPlatformCommons( testDependencies ) )
-                {
-                    filterTestDependency = "org.junit.platform:junit-platform-commons";
-                }
-
-                if ( filterTestDependency != null )
-                {
-                    logDebugOrCliShowErrors( "Test dependencies contain " + filterTestDependency );
-                    narrowProviderDependencies( filterTestDependency, providerArtifacts, testDependencies );
-                }
+                String api = "org.junit.jupiter:junit-jupiter-api";
+                logDebugOrCliShowErrors( "Test dependencies contain " + api + ". Resolving " + engineCoordinates );
+                String engineVersion = testDependencies.get( api ).getBaseVersion();
+                addEngineByApi( engineGroupId, engineArtifactId, engineVersion,
+                        providerArtifacts, testDependencies );
             }
             return new LinkedHashSet<>( providerArtifacts.values() );
         }
@@ -2983,9 +2988,10 @@ public abstract class AbstractSurefireMojo
             alignVersions( providerArtifacts, testDependencies );
         }
 
-        private void alignVersions( Map<String, Artifact> providerArtifacts, Map<String, Artifact> testDependencies )
+        private void alignVersions( Map<String, Artifact> providerArtifacts,
+                                    Map<String, Artifact> referencedDependencies )
         {
-            String version = testDependencies.get( "org.junit.platform:junit-platform-commons" ).getBaseVersion();
+            String version = referencedDependencies.get( "org.junit.platform:junit-platform-commons" ).getBaseVersion();
             for ( Artifact launcherArtifact : resolve( PROVIDER_DEP_GID, PROVIDER_DEP_AID, version, null, "jar" ) )
             {
                 String key = launcherArtifact.getGroupId() + ":" + launcherArtifact.getArtifactId();
@@ -3006,24 +3012,22 @@ public abstract class AbstractSurefireMojo
             return r;
         }
 
-        private boolean hasDependencyJUnit4( Map<String, Artifact> providerArtifacts )
+        private boolean hasDependencyJupiterAPI( Map<String, Artifact> dependencies )
         {
-            return providerArtifacts.containsKey( "junit:junit" );
+            return dependencies.containsKey( "org.junit.jupiter:junit-jupiter-api" )
+                    || hasGroupArtifactId( "org.junit.jupiter", "junit-jupiter-api", getProject().getArtifact() );
         }
 
-        private boolean hasDependencyJupiterAPI( Map<String, Artifact> providerArtifacts )
+        private boolean hasDependencyPlatformCommons( Map<String, Artifact> dependencies )
         {
-            return providerArtifacts.containsKey( "org.junit.jupiter:junit-jupiter-api" );
+            return dependencies.containsKey( "org.junit.platform:junit-platform-commons" )
+                   || hasGroupArtifactId( "org.junit.platform", "junit-platform-commons", getProject().getArtifact() );
         }
 
-        private boolean hasDependencyPlatformCommons( Map<String, Artifact> providerArtifacts )
+        private boolean hasDependencyPlatformEngine( Map<String, Artifact> dependencies )
         {
-            return providerArtifacts.containsKey( "org.junit.platform:junit-platform-commons" );
-        }
-
-        private boolean hasDependencyPlatformEngine( Map<String, Artifact> providerArtifacts )
-        {
-            return providerArtifacts.containsKey( "org.junit.platform:junit-platform-engine" );
+            return dependencies.containsKey( "org.junit.platform:junit-platform-engine" )
+                    || hasGroupArtifactId( "org.junit.platform", "junit-platform-engine", getProject().getArtifact() );
         }
     }
 

@@ -1,5 +1,3 @@
-package org.apache.maven.surefire.its.jiras;
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -19,36 +17,12 @@ package org.apache.maven.surefire.its.jiras;
  * under the License.
  */
 
-import org.apache.maven.surefire.its.fixture.SurefireJUnit4IntegrationTestCase;
-import org.junit.Before;
 import org.junit.Test;
 
-import static org.apache.maven.surefire.its.fixture.HelperAssertions.assumeJavaVersion;
-
-public class Surefire1585IT
-        extends SurefireJUnit4IntegrationTestCase
+public class JUnit4Test
 {
-    @Before
-    public void setUp()
-    {
-        assumeJavaVersion( 1.8d );
-    }
-
     @Test
-    public void shouldRunWithJupiterApi()
+    public void test()
     {
-        unpack( "surefire-1585-jupiter-api" )
-                .debugLogging()
-                .executeTest()
-                .verifyErrorFree( 1 );
-    }
-
-    @Test
-    public void shouldRunWithVintage()
-    {
-        unpack( "surefire-1585-junit4-vintage" )
-                .debugLogging()
-                .executeTest()
-                .verifyErrorFree( 1 );
     }
 }

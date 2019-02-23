@@ -24,7 +24,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>org.apache.maven.plugins.surefire</groupId>
-    <artifactId>junit-jupiter-api-it</artifactId>
+    <artifactId>surefire-1585-jupiter-api-it</artifactId>
     <version>1.0</version>
 
     <properties>
