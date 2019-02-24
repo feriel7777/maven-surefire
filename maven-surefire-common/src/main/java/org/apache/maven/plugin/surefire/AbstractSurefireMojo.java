@@ -96,7 +96,6 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -115,6 +114,7 @@ import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.apache.commons.lang3.StringUtils.substringBeforeLast;
 import static org.apache.commons.lang3.SystemUtils.IS_OS_WINDOWS;
+import static org.apache.maven.artifact.ArtifactUtils.artifactMapByVersionlessId;
 import static org.apache.maven.plugin.surefire.SurefireDependencyResolver.isWithinVersionSpec;
 import static org.apache.maven.plugin.surefire.util.DependencyScanner.filter;
 import static org.apache.maven.plugin.surefire.SurefireHelper.replaceThreadNumberPlaceholders;
@@ -2929,14 +2929,10 @@ public abstract class AbstractSurefireMojo
             }
             else if ( hasDependencyPlatformEngine( getPluginArtifactMap() ) )
             {
+                Set<Artifact> pluginArtifacts =
+                        dependencyResolver.resolvePluginArtifactOffline( getMojoArtifact() ).getArtifacts();
                 Map<String, Artifact> engineArtifacts = new HashMap<>( getPluginArtifactMap() );
-                for ( Iterator<String> keys = engineArtifacts.keySet().iterator(); keys.hasNext(); )
-                {
-                    if ( keys.next().startsWith( "org.apache.maven.surefire:" ) )
-                    {
-                        keys.remove();
-                    }
-                }
+                engineArtifacts.keySet().removeAll( artifactMapByVersionlessId( pluginArtifacts ).keySet() );
                 providerArtifacts.putAll( engineArtifacts );
                 alignVersions( providerArtifacts, engineArtifacts );
             }
@@ -2951,6 +2947,7 @@ public abstract class AbstractSurefireMojo
                 addEngineByApi( engineGroupId, engineArtifactId, engineVersion,
                         providerArtifacts, testDependencies );
             }
+            providerArtifacts.keySet().removeAll( testDependencies.keySet() );
             return new LinkedHashSet<>( providerArtifacts.values() );
         }
 

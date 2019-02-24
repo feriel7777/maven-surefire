@@ -20,7 +20,6 @@ package org.apache.maven.plugin.surefire;
  */
 
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +41,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import static org.apache.maven.artifact.Artifact.SCOPE_TEST;
+import static org.apache.maven.artifact.ArtifactUtils.artifactMapByVersionlessId;
 import static org.apache.maven.artifact.versioning.VersionRange.createFromVersionSpec;
 
 /**
@@ -118,6 +118,11 @@ final class SurefireDependencyResolver
         }
     }
 
+    ArtifactResolutionResult resolvePluginArtifactOffline( Artifact artifact )
+    {
+        return resolveArtifact( artifact, null );
+    }
+
     ArtifactResolutionResult resolvePluginArtifact( Artifact artifact )
     {
         return resolveArtifact( artifact, pluginRemoteRepositories );
@@ -132,9 +137,17 @@ final class SurefireDependencyResolver
     {
         ArtifactResolutionRequest request = new ArtifactResolutionRequest()
                                                     .setArtifact( artifact )
-                                                    .setRemoteRepositories( repositories )
                                                     .setLocalRepository( localRepository )
                                                     .setResolveTransitively( true );
+        if ( repositories == null )
+        {
+            request.setOffline( true );
+        }
+        else
+        {
+            request.setRemoteRepositories( repositories );
+        }
+
         return repositorySystem.resolve( request );
     }
 
@@ -163,13 +176,7 @@ final class SurefireDependencyResolver
     @Nonnull
     Map<String, Artifact> getProviderClasspathAsMap( String providerArtifactId, String providerVersion )
     {
-        Map<String, Artifact> cpArtifactsMapping = new LinkedHashMap<>();
-        for ( Artifact cpArtifact : getProviderClasspath( providerArtifactId, providerVersion ) )
-        {
-            String key = cpArtifact.getGroupId() + ":" + cpArtifact.getArtifactId();
-            cpArtifactsMapping.put( key, cpArtifact );
-        }
-        return cpArtifactsMapping;
+        return artifactMapByVersionlessId( getProviderClasspath( providerArtifactId, providerVersion ) );
     }
 
     Set<Artifact> addProviderToClasspath( Map<String, Artifact> pluginArtifactMap, Artifact mojoPluginArtifact,
